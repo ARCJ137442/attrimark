@@ -176,6 +176,11 @@ export function BlockCard({
     focusRef?.(view);
 
     return () => {
+      // Cancel pending debounced update to prevent requests after deletion
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
       view.destroy();
       viewRef.current = null;
       focusRef?.(null);

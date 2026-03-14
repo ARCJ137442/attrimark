@@ -22,12 +22,18 @@ export function DocumentEditor() {
 
   const handleUpdate = useCallback(
     async (blockId: string, content: string, version: number) => {
+      // Skip if block was already deleted
+      const { blocks: currentBlocks } = useEditorStore.getState();
+      if (!currentBlocks.some((b) => b.id === blockId)) return;
+
       try {
         return await updateBlock(blockId, content, version);
       } catch (err: any) {
         if (err.status === 409) {
-          // Conflict — reload
           if (id) loadDocument(id);
+        } else if (err.status === 404) {
+          // Block was deleted between debounce and request — ignore
+          return;
         }
         throw err;
       }
