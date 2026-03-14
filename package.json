@@ -1,0 +1,36 @@
+{
+  "name": "provenance-editor",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev:server": "bun run --watch src/server/index.ts",
+    "dev:client": "bunx vite",
+    "dev": "bun run dev:server & bun run dev:client",
+    "cli": "bun run src/cli/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "vite": "^6"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@codemirror/lang-markdown": "^6",
+    "@codemirror/language-data": "^6",
+    "@codemirror/view": "^6",
+    "@codemirror/state": "^6",
+    "codemirror": "^6",
+    "fast-diff": "^1.3.0",
+    "hono": "^4.12.8",
+    "nanoid": "^5.1.6",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-router-dom": "^7",
+    "zustand": "^5"
+  }
+}
