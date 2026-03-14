@@ -14,4 +14,9 @@ console.log(`Attrimark API running on http://localhost:${port}`);
 export default {
   port,
   fetch: app.fetch,
+  idleTimeout: 255, // Max value; SSE long connections need this
+  error(err: Error) {
+    // Suppress SSE disconnect errors
+    return new Response(null, { status: 500 });
+  },
 };
