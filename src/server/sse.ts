@@ -10,6 +10,18 @@ const encoder = new TextEncoder();
 const clients: Map<string, SSEClient> = new Map();
 let clientIdCounter = 0;
 
+function cleanup(clientId: string) {
+  const client = clients.get(clientId);
+  if (client) {
+    clearInterval(client.heartbeat);
+    clients.delete(clientId);
+  }
+}
+
+function safeWrite(clientId: string, writer: WritableStreamDefaultWriter, data: Uint8Array) {
+  writer.write(data).catch(() => cleanup(clientId));
+}
+
 export function createSSEResponse(documentId: string): Response {
   const clientId = `sse-${++clientIdCounter}`;
 
@@ -17,18 +29,13 @@ export function createSSEResponse(documentId: string): Response {
   const writer = writable.getWriter();
 
   // Send initial event
-  writer.write(
+  safeWrite(clientId, writer,
     encoder.encode(`event: connected\ndata: ${JSON.stringify({ clientId })}\n\n`)
   );
 
   // Heartbeat every 15s to keep connection alive
   const heartbeat = setInterval(() => {
-    try {
-      writer.write(encoder.encode(`: heartbeat\n\n`));
-    } catch {
-      clearInterval(heartbeat);
-      clients.delete(clientId);
-    }
+    safeWrite(clientId, writer, encoder.encode(`: heartbeat\n\n`));
   }, 15000);
 
   clients.set(clientId, { writer, documentId, heartbeat });
@@ -53,12 +60,7 @@ export function broadcast(
 
   for (const [id, client] of clients) {
     if (client.documentId === documentId) {
-      try {
-        client.writer.write(message);
-      } catch {
-        clearInterval(client.heartbeat);
-        clients.delete(id);
-      }
+      safeWrite(id, client.writer, message);
     }
   }
 }

@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { api } from "./api";
 
+// Prevent SSE disconnect errors from crashing the process
+process.on("unhandledRejection", () => {});
+process.on("uncaughtException", () => {});
+
 const app = new Hono();
 
 app.use("/*", cors());
