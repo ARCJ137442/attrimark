@@ -33,9 +33,6 @@ export function createSSEResponse(documentId: string): Response {
 
   clients.set(clientId, { writer, documentId, heartbeat });
 
-  // Clean up when client disconnects
-  readable.pipeTo(new WritableStream()).catch(() => {});
-
   return new Response(readable, {
     headers: {
       "Content-Type": "text/event-stream",

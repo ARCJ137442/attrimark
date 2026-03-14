@@ -318,8 +318,11 @@ function splitMarkdownBlocks(markdown: string): string[] {
 
 api.get("/documents/:id/events", (c) => {
   const docId = c.req.param("id");
-  const doc = db.getDocument(docId);
-  if (!doc) return c.json({ error: "Document not found" }, 404);
-
-  return createSSEResponse(docId);
+  try {
+    const doc = db.getDocument(docId);
+    if (!doc) return c.json({ error: "Document not found" }, 404);
+    return createSSEResponse(docId);
+  } catch {
+    return c.json({ error: "SSE connection failed" }, 503);
+  }
 });
