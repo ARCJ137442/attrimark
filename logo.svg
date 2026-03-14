@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Left stroke / -->
+  <line x1="60" y1="460" x2="200" y2="60" stroke="#2b8af6" stroke-width="56" stroke-linecap="round"/>
+
+  <!-- Right stroke \ -->
+  <line x1="200" y1="60" x2="340" y2="460" stroke="#2b8af6" stroke-width="56" stroke-linecap="round"/>
+
+  <!-- Third stroke: top extended +14, bottom extended +28 -->
+  <path d="M 281 61 A 28 28 0 0 1 333 42 L 476 451 L 459 486 L 424 469 Z" fill="#2b8af6"/>
+
+  <!-- Crossbar -->
+  <line x1="118" y1="310" x2="282" y2="310" stroke="#2b8af6" stroke-width="44" stroke-linecap="round"/>
+</svg>

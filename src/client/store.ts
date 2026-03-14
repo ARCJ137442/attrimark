@@ -74,24 +74,38 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   connectSSE(documentId: string) {
     get().disconnectSSE();
-    const es = new EventSource(`/api/documents/${documentId}/events`);
+    // SSE connects directly to backend to avoid Vite proxy buffering
+    const sseBase = import.meta.env.DEV ? "http://localhost:12479" : "";
+    const es = new EventSource(`${sseBase}/api/documents/${documentId}/events`);
+
+    es.onopen = () => {
+      console.log("[SSE] connected to", documentId);
+    };
+
+    es.onerror = (err) => {
+      console.error("[SSE] error", err);
+    };
 
     es.addEventListener("block_created", (e) => {
+      console.log("[SSE] block_created", e.data);
       const block = JSON.parse(e.data);
       get()._addLocalBlock(block);
     });
 
     es.addEventListener("block_updated", (e) => {
+      console.log("[SSE] block_updated");
       const block = JSON.parse(e.data);
       get()._updateLocalBlock(block);
     });
 
     es.addEventListener("block_deleted", (e) => {
+      console.log("[SSE] block_deleted");
       const { id } = JSON.parse(e.data);
       get()._removeLocalBlock(id);
     });
 
     es.addEventListener("stats_changed", (e) => {
+      console.log("[SSE] stats_changed");
       const stats = JSON.parse(e.data);
       set({ stats });
     });

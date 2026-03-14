@@ -47,7 +47,7 @@ export function DocumentList() {
   return (
     <div className="page">
       <header className="page-header">
-        <h1>Provenance Editor</h1>
+        <h1><img src="/logo.svg" alt="Attrimark" className="logo-icon" /> Attrimark</h1>
         <p className="subtitle">AI 内容溯源编辑器</p>
       </header>
 

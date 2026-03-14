@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import * as db from "./db";
-import { broadcast, createSSEStream } from "./sse";
+import { broadcast, createSSEResponse } from "./sse";
 import { createAttribution, computeBlockDerived, concatAttribution } from "../core/attribution";
 import { applyDiffAttribution, applyPatchAttribution } from "../core/diff";
 import type { AttributionSpan, SourceType, Block } from "../core/types";
@@ -321,13 +321,5 @@ api.get("/documents/:id/events", (c) => {
   const doc = db.getDocument(docId);
   if (!doc) return c.json({ error: "Document not found" }, 404);
 
-  const { stream } = createSSEStream(docId);
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+  return createSSEResponse(docId);
 });

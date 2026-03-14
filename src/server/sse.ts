@@ -1,32 +1,48 @@
 import type { SSEEventType } from "../core/types";
 
 type SSEClient = {
-  controller: ReadableStreamDefaultController;
+  writer: WritableStreamDefaultWriter;
   documentId: string;
+  heartbeat: ReturnType<typeof setInterval>;
 };
 
+const encoder = new TextEncoder();
 const clients: Map<string, SSEClient> = new Map();
 let clientIdCounter = 0;
 
-export function createSSEStream(documentId: string): {
-  stream: ReadableStream;
-  clientId: string;
-} {
+export function createSSEResponse(documentId: string): Response {
   const clientId = `sse-${++clientIdCounter}`;
 
-  const stream = new ReadableStream({
-    start(controller) {
-      clients.set(clientId, { controller, documentId });
-      // Send initial connection event
-      const data = `event: connected\ndata: ${JSON.stringify({ clientId })}\n\n`;
-      controller.enqueue(new TextEncoder().encode(data));
-    },
-    cancel() {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+
+  // Send initial event
+  writer.write(
+    encoder.encode(`event: connected\ndata: ${JSON.stringify({ clientId })}\n\n`)
+  );
+
+  // Heartbeat every 15s to keep connection alive
+  const heartbeat = setInterval(() => {
+    try {
+      writer.write(encoder.encode(`: heartbeat\n\n`));
+    } catch {
+      clearInterval(heartbeat);
       clients.delete(clientId);
+    }
+  }, 15000);
+
+  clients.set(clientId, { writer, documentId, heartbeat });
+
+  // Clean up when client disconnects
+  readable.pipeTo(new WritableStream()).catch(() => {});
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
     },
   });
-
-  return { stream, clientId };
 }
 
 export function broadcast(
@@ -34,26 +50,18 @@ export function broadcast(
   eventType: SSEEventType,
   data: unknown
 ) {
-  const message = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-  const encoded = new TextEncoder().encode(message);
+  const message = encoder.encode(
+    `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`
+  );
 
   for (const [id, client] of clients) {
     if (client.documentId === documentId) {
       try {
-        client.controller.enqueue(encoded);
+        client.writer.write(message);
       } catch {
+        clearInterval(client.heartbeat);
         clients.delete(id);
       }
     }
-  }
-}
-
-export function removeClient(clientId: string) {
-  const client = clients.get(clientId);
-  if (client) {
-    try {
-      client.controller.close();
-    } catch {}
-    clients.delete(clientId);
   }
 }

@@ -9,7 +9,7 @@ app.route("/api", api);
 
 const port = parseInt(process.env.PORT ?? "12479");
 
-console.log(`Provenance Editor API running on http://localhost:${port}`);
+console.log(`Attrimark API running on http://localhost:${port}`);
 
 export default {
   port,
