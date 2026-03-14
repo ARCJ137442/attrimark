@@ -1,5 +1,5 @@
 {
-  "name": "provenance-editor",
+  "name": "attrimark",
   "module": "index.ts",
   "type": "module",
   "private": true,
