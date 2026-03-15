@@ -42,6 +42,8 @@ Commands:
   block create <doc-id> -c <content>      Create block
   block update <doc-id> <bid> -c <content>  Update block content
   block patch <doc-id> <bid> --old <s> --new <s>  Patch block
+  block split <doc-id> <bid> --pos <N>     Split block at position N
+  block merge <doc-id> <bid> --target <tid>  Merge bid into tid
   block delete <doc-id> <bid>             Delete block
 
   stats <doc-id>                          Get document stats
@@ -161,6 +163,46 @@ async function main() {
               new: newStr,
               author,
               version: current.version,
+            })
+          );
+        }
+        case "split": {
+          const bid = args[3];
+          if (!bid) usage();
+          const posStr = findOption("--pos");
+          if (!posStr) usage();
+          const pos = parseInt(posStr!, 10);
+          const blocks2 = (await request("GET", `/documents/${docId}/blocks`)) as any[];
+          const current2 = blocks2.find((b: any) => b.id === bid);
+          if (!current2) {
+            console.error("Block not found");
+            process.exit(1);
+          }
+          return out(
+            await request("POST", `/documents/${docId}/blocks/${bid}/split`, {
+              position: pos,
+              version: current2.version,
+            })
+          );
+        }
+        case "merge": {
+          const bid = args[3];
+          if (!bid) usage();
+          const targetId = findOption("--target");
+          if (!targetId) usage();
+          const blocks3 = (await request("GET", `/documents/${docId}/blocks`)) as any[];
+          const source = blocks3.find((b: any) => b.id === bid);
+          const target = blocks3.find((b: any) => b.id === targetId);
+          if (!source || !target) {
+            console.error("Block not found");
+            process.exit(1);
+          }
+          return out(
+            await request("POST", `/documents/${docId}/blocks/${bid}/merge`, {
+              targetBlockId: targetId,
+              version: source.version,
+              targetVersion: target.version,
+              author,
             })
           );
         }

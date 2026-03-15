@@ -8,7 +8,7 @@ import type {
   DocumentStats,
   EditLog,
 } from "../core/types";
-import { computeBlockDerived } from "../core/attribution";
+import { computeBlockDerived, splitAttributionAt, concatAttribution, createAttribution } from "../core/attribution";
 
 let db: Database;
 
@@ -219,6 +219,127 @@ export function deleteBlock(
   touchDocument(existing.documentId);
 
   return { deleted: true, documentId: existing.documentId };
+}
+
+// === Split / Merge ===
+
+export function splitBlock(
+  id: string,
+  position: number,
+  expectedVersion: number
+): { original: Block; new_: Block } | { conflict: true; block: Block } {
+  const existing = getBlock(id);
+  if (!existing) throw new Error("Block not found");
+  if (existing.version !== expectedVersion) {
+    return { conflict: true, block: existing };
+  }
+
+  const [leftAttr, rightAttr] = splitAttributionAt(existing.attribution, position);
+  const leftContent = existing.content.slice(0, position);
+  const rightContent = existing.content.slice(position);
+
+  const now = new Date().toISOString();
+  const newVersion = existing.version + 1;
+
+  // Update original block with left half
+  getDb()
+    .query(
+      `UPDATE blocks SET content = ?, attribution = ?, version = ?, updated_at = ?
+       WHERE id = ? AND version = ?`
+    )
+    .run(leftContent, JSON.stringify(leftAttr), newVersion, now, id, expectedVersion);
+
+  // Create new block with right half
+  const newId = nanoid();
+  const newPosition = existing.position + 0.5;
+  getDb()
+    .query(
+      `INSERT INTO blocks (id, document_id, content, attribution, last_source, position, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    )
+    .run(newId, existing.documentId, rightContent, JSON.stringify(rightAttr), existing.lastSource, newPosition, now, now);
+
+  touchDocument(existing.documentId);
+
+  const original: Block = {
+    ...existing,
+    content: leftContent,
+    attribution: leftAttr,
+    version: newVersion,
+    updatedAt: now,
+  };
+
+  const new_: Block = {
+    id: newId,
+    documentId: existing.documentId,
+    content: rightContent,
+    attribution: rightAttr,
+    lastSource: existing.lastSource,
+    position: newPosition,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return { original, new_ };
+}
+
+export function mergeBlocks(
+  sourceId: string,
+  targetId: string,
+  sourceVersion: number,
+  targetVersion: number,
+  authorType: SourceType
+): { merged: Block } | { conflict: true; block: Block; which: "source" | "target" } {
+  const source = getBlock(sourceId);
+  const target = getBlock(targetId);
+  if (!source) throw new Error("Source block not found");
+  if (!target) throw new Error("Target block not found");
+
+  if (source.version !== sourceVersion) {
+    return { conflict: true, block: source, which: "source" };
+  }
+  if (target.version !== targetVersion) {
+    return { conflict: true, block: target, which: "target" };
+  }
+
+  // Merge content with \n\n separator
+  const separator = "\n\n";
+  const mergedContent = target.content + separator + source.content;
+
+  // Merge attribution: target attrs + separator (attributed to author) + source attrs
+  const separatorAttr = createAttribution(authorType, separator.length);
+  const mergedAttribution = concatAttribution(
+    concatAttribution(target.attribution, separatorAttr),
+    source.attribution
+  );
+
+  const now = new Date().toISOString();
+  const newVersion = target.version + 1;
+
+  // Update target with merged content
+  getDb()
+    .query(
+      `UPDATE blocks SET content = ?, attribution = ?, last_source = ?, version = ?, updated_at = ?
+       WHERE id = ? AND version = ?`
+    )
+    .run(mergedContent, JSON.stringify(mergedAttribution), authorType, newVersion, now, targetId, targetVersion);
+
+  // Delete source block
+  getDb().query("DELETE FROM blocks WHERE id = ?").run(sourceId);
+
+  touchDocument(target.documentId);
+
+  const merged: Block = {
+    ...target,
+    content: mergedContent,
+    attribution: mergedAttribution,
+    lastSource: authorType,
+    version: newVersion,
+    updatedAt: now,
+  };
+
+  return { merged };
 }
 
 // === Edit Logs ===

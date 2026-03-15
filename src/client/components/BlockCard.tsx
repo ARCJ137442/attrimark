@@ -1,6 +1,6 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { EditorView, keymap, Decoration, type DecorationSet, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { EditorState, type Extension, RangeSetBuilder } from "@codemirror/state";
+import { EditorState, type Extension, RangeSetBuilder, Prec } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -13,6 +13,7 @@ interface BlockCardProps {
     attribution: AttributionSpan[];
     lastSource: "human" | "agent";
     version: number;
+    position: number;
     source: "human" | "agent" | "mixed";
     humanChars: number;
     agentChars: number;
@@ -21,10 +22,16 @@ interface BlockCardProps {
   };
   onUpdate: (blockId: string, content: string, version: number) => Promise<any>;
   onDelete: (blockId: string, version: number) => void;
+  onSplit: (blockId: string, position: number, version: number) => void;
   onCreateAfter: (position: number) => void;
+  onCreateBefore: (position: number) => void;
   onMergeWithPrevious?: (blockId: string) => void;
+  onMergeWithNext?: (blockId: string) => void;
   onFocusNext?: () => void;
   onFocusPrev?: () => void;
+  onFocusPrevEnd?: () => void;
+  onFocusNextStart?: () => void;
+  onFocusChange?: (blockId: string, cursorPos: number) => void;
   focusRef?: (view: EditorView | null) => void;
 }
 
@@ -49,17 +56,22 @@ export function BlockCard({
   block,
   onUpdate,
   onDelete,
+  onSplit,
   onCreateAfter,
+  onCreateBefore,
   onMergeWithPrevious,
+  onMergeWithNext,
   onFocusNext,
   onFocusPrev,
+  onFocusPrevEnd,
+  onFocusNextStart,
+  onFocusChange,
   focusRef,
 }: BlockCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blockRef = useRef(block);
-  const [lastEnter, setLastEnter] = useState(0);
 
   blockRef.current = block;
 
@@ -81,7 +93,6 @@ export function BlockCard({
       () => ({
         decorations: buildDecorations(blockRef.current.attribution),
         update(update: ViewUpdate) {
-          // Rebuild decorations when doc changes — we'll get fresh attribution from parent
           if (update.docChanged) {
             this.decorations = buildDecorations(blockRef.current.attribution);
           }
@@ -91,44 +102,120 @@ export function BlockCard({
     );
 
     const customKeymap = keymap.of([
+      // Shift+Enter: split block at cursor
       {
-        key: "Enter",
+        key: "Shift-Enter",
         run: (view) => {
-          const now = Date.now();
           const pos = view.state.selection.main.head;
-          const docLen = view.state.doc.length;
-
-          // Double Enter at end → new block
-          if (pos === docLen && now - lastEnter < 400) {
-            // Remove the newline that was just inserted
-            const lastLine = view.state.doc.lineAt(docLen);
-            if (lastLine.text === "") {
-              view.dispatch({
-                changes: { from: lastLine.from - 1, to: lastLine.to },
-              });
-            }
-            onCreateAfter(blockRef.current.position ?? 0);
-            return true;
+          const b = blockRef.current;
+          // Flush pending changes before split
+          if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+            debounceRef.current = null;
           }
-          setLastEnter(now);
-          return false;
+          onSplit(b.id, pos, b.version);
+          return true;
         },
       },
+      // Ctrl+Enter: insert empty block after
+      {
+        key: "Mod-Enter",
+        run: () => {
+          onCreateAfter(blockRef.current.position);
+          return true;
+        },
+      },
+      // Ctrl+Shift+Enter: insert empty block before
+      {
+        key: "Mod-Shift-Enter",
+        run: () => {
+          onCreateBefore(blockRef.current.position);
+          return true;
+        },
+      },
+      // Backspace at position 0
       {
         key: "Backspace",
         run: (view) => {
           const pos = view.state.selection.main.head;
-          if (pos === 0 && view.state.doc.length === 0) {
+          if (pos !== 0) return false;
+          if (view.state.doc.length === 0) {
             onDelete(blockRef.current.id, blockRef.current.version);
             return true;
           }
-          if (pos === 0 && onMergeWithPrevious) {
+          if (onMergeWithPrevious) {
+            // Flush pending changes before merge
+            if (debounceRef.current) {
+              clearTimeout(debounceRef.current);
+              debounceRef.current = null;
+            }
             onMergeWithPrevious(blockRef.current.id);
             return true;
           }
           return false;
         },
       },
+      // Delete at end of block
+      {
+        key: "Delete",
+        run: (view) => {
+          const pos = view.state.selection.main.head;
+          const docLen = view.state.doc.length;
+          if (pos !== docLen) return false;
+          if (onMergeWithNext) {
+            if (debounceRef.current) {
+              clearTimeout(debounceRef.current);
+              debounceRef.current = null;
+            }
+            onMergeWithNext(blockRef.current.id);
+            return true;
+          }
+          return false;
+        },
+      },
+      // Arrow up/left at position 0 → jump to previous block end
+      {
+        key: "ArrowUp",
+        run: (view) => {
+          if (view.state.selection.main.head === 0) {
+            onFocusPrevEnd?.();
+            return true;
+          }
+          return false;
+        },
+      },
+      {
+        key: "ArrowLeft",
+        run: (view) => {
+          if (view.state.selection.main.head === 0) {
+            onFocusPrevEnd?.();
+            return true;
+          }
+          return false;
+        },
+      },
+      // Arrow down/right at end → jump to next block start
+      {
+        key: "ArrowDown",
+        run: (view) => {
+          if (view.state.selection.main.head === view.state.doc.length) {
+            onFocusNextStart?.();
+            return true;
+          }
+          return false;
+        },
+      },
+      {
+        key: "ArrowRight",
+        run: (view) => {
+          if (view.state.selection.main.head === view.state.doc.length) {
+            onFocusNextStart?.();
+            return true;
+          }
+          return false;
+        },
+      },
+      // Tab navigation
       {
         key: "Tab",
         run: () => {
@@ -146,15 +233,19 @@ export function BlockCard({
     ]);
 
     const extensions: Extension[] = [
+      Prec.highest(customKeymap),
       markdown({ codeLanguages: languages }),
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      customKeymap,
       attributionPlugin,
       EditorView.lineWrapping,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           handleChange(update.state.doc.toString());
+        }
+        // Track focus + cursor position
+        if (update.focusChanged && update.view.hasFocus) {
+          onFocusChange?.(blockRef.current.id, update.state.selection.main.head);
         }
       }),
       EditorView.theme({
@@ -176,7 +267,6 @@ export function BlockCard({
     focusRef?.(view);
 
     return () => {
-      // Cancel pending debounced update to prevent requests after deletion
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
@@ -185,7 +275,7 @@ export function BlockCard({
       viewRef.current = null;
       focusRef?.(null);
     };
-  }, [block.id]); // Re-create only when block ID changes
+  }, [block.id]);
 
   // Update content from external changes (SSE)
   useEffect(() => {

@@ -15,6 +15,13 @@ interface EditorStore {
   createBlock(content: string, position?: number): Promise<any>;
   updateBlock(blockId: string, content: string, version: number): Promise<any>;
   deleteBlock(blockId: string, version: number): Promise<void>;
+  splitBlock(blockId: string, position: number, version: number): Promise<any>;
+  mergeBlocks(sourceId: string, targetId: string, sourceVersion: number, targetVersion: number): Promise<any>;
+
+  // Focus tracking
+  lastFocusedBlockId: string | null;
+  lastCursorPosition: number;
+  setFocusState(blockId: string | null, cursorPos?: number): void;
 
   // SSE
   eventSource: EventSource | null;
@@ -33,6 +40,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   blocks: [],
   stats: null,
   eventSource: null,
+  lastFocusedBlockId: null,
+  lastCursorPosition: 0,
 
   async loadDocuments() {
     const documents = await api.listDocuments();
@@ -72,6 +81,31 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     get()._removeLocalBlock(blockId);
   },
 
+  async splitBlock(blockId: string, position: number, version: number) {
+    const { document } = get();
+    if (!document) return;
+    const result = await api.splitBlock(document.id, blockId, position, version);
+    get()._updateLocalBlock(result.original);
+    get()._addLocalBlock(result.new);
+    return result;
+  },
+
+  async mergeBlocks(sourceId: string, targetId: string, sourceVersion: number, targetVersion: number) {
+    const { document } = get();
+    if (!document) return;
+    const result = await api.mergeBlocks(document.id, sourceId, targetId, sourceVersion, targetVersion);
+    get()._updateLocalBlock(result.merged);
+    get()._removeLocalBlock(sourceId);
+    return result;
+  },
+
+  setFocusState(blockId: string | null, cursorPos?: number) {
+    set({
+      lastFocusedBlockId: blockId,
+      lastCursorPosition: cursorPos ?? 0,
+    });
+  },
+
   connectSSE(documentId: string) {
     get().disconnectSSE();
     // SSE connects directly to backend to avoid Vite proxy buffering
@@ -94,7 +128,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     });
 
     es.addEventListener("stats_changed", (e) => {
-      console.log("[SSE] stats_changed");
       const stats = JSON.parse(e.data);
       set({ stats });
     });
@@ -124,7 +157,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   _addLocalBlock(block: any) {
     set((state) => {
-      // Avoid duplicates
       if (state.blocks.some((b) => b.id === block.id)) return state;
       const blocks = [...state.blocks, block].sort((a, b) => a.position - b.position);
       return { blocks };

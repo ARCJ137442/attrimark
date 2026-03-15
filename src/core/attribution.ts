@@ -109,3 +109,14 @@ export function concatAttribution(
 ): AttributionSpan[] {
   return mergeSpans([...a, ...b]);
 }
+
+/** Split attribution at a character position into two halves */
+export function splitAttributionAt(
+  spans: AttributionSpan[],
+  position: number
+): [AttributionSpan[], AttributionSpan[]] {
+  const chars = expandSpans(spans);
+  const left = compressChars(chars.slice(0, position));
+  const right = compressChars(chars.slice(position));
+  return [left, right];
+}

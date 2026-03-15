@@ -180,6 +180,63 @@ api.delete("/documents/:id/blocks/:bid", async (c) => {
   return c.body(null, 204);
 });
 
+// === Split / Merge ===
+
+api.post("/documents/:id/blocks/:bid/split", async (c) => {
+  const blockId = c.req.param("bid");
+  const docId = c.req.param("id");
+  const { position, version } = await c.req.json();
+
+  if (position === undefined) return c.json({ error: "position is required" }, 400);
+  if (version === undefined) return c.json({ error: "version is required" }, 400);
+
+  const result = db.splitBlock(blockId, position, version);
+  if ("conflict" in result) {
+    return c.json(
+      { error: "Version conflict", currentContent: result.block.content, currentVersion: result.block.version },
+      409
+    );
+  }
+
+  const enrichedOriginal = enrichBlock(result.original);
+  const enrichedNew = enrichBlock(result.new_);
+
+  broadcast(docId, "block_updated", enrichedOriginal);
+  broadcast(docId, "block_created", enrichedNew);
+  broadcast(docId, "stats_changed", db.getDocumentStats(docId));
+
+  return c.json({ original: enrichedOriginal, new: enrichedNew });
+});
+
+api.post("/documents/:id/blocks/:bid/merge", async (c) => {
+  const sourceId = c.req.param("bid");
+  const docId = c.req.param("id");
+  const { targetBlockId, version, targetVersion, author } = await c.req.json();
+
+  if (!targetBlockId) return c.json({ error: "targetBlockId is required" }, 400);
+  if (version === undefined) return c.json({ error: "version is required" }, 400);
+  if (targetVersion === undefined) return c.json({ error: "targetVersion is required" }, 400);
+
+  const authorType = author?.type ?? "human";
+  const result = db.mergeBlocks(sourceId, targetBlockId, version, targetVersion, authorType);
+  if ("conflict" in result) {
+    return c.json(
+      { error: "Version conflict", which: result.which, currentVersion: result.block.version },
+      409
+    );
+  }
+
+  const enrichedMerged = enrichBlock(result.merged);
+
+  db.addEditLog(targetBlockId, docId, authorType, 0, author?.name);
+
+  broadcast(docId, "block_updated", enrichedMerged);
+  broadcast(docId, "block_deleted", { id: sourceId });
+  broadcast(docId, "stats_changed", db.getDocumentStats(docId));
+
+  return c.json({ merged: enrichedMerged });
+});
+
 // === Stats ===
 
 api.get("/documents/:id/stats", (c) => {

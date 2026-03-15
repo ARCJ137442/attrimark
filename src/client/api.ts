@@ -49,6 +49,18 @@ export const patchBlock = (docId: string, blockId: string, oldStr: string, newSt
 export const deleteBlockApi = (docId: string, blockId: string, version: number) =>
   request<void>("DELETE", `/documents/${docId}/blocks/${blockId}`, { version });
 
+// Split / Merge
+export const splitBlock = (docId: string, blockId: string, position: number, version: number) =>
+  request<any>("POST", `/documents/${docId}/blocks/${blockId}/split`, { position, version });
+
+export const mergeBlocks = (docId: string, sourceId: string, targetId: string, sourceVersion: number, targetVersion: number) =>
+  request<any>("POST", `/documents/${docId}/blocks/${sourceId}/merge`, {
+    targetBlockId: targetId,
+    version: sourceVersion,
+    targetVersion,
+    author: { type: "human" },
+  });
+
 // Stats
 export const getStats = (docId: string) => request<any>("GET", `/documents/${docId}/stats`);
 
