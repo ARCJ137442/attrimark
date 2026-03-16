@@ -17,6 +17,16 @@ async function request(
 
   if (res.status === 204) return null;
 
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("text/plain")) {
+    const text = await res.text();
+    if (!res.ok) {
+      console.error(text);
+      process.exit(1);
+    }
+    return text;
+  }
+
   const data = await res.json();
   if (!res.ok) {
     console.error(JSON.stringify(data, null, 2));
@@ -26,29 +36,36 @@ async function request(
 }
 
 function out(data: unknown) {
-  console.log(JSON.stringify(data, null, 2));
+  console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
+}
+
+function q(filePath: string): string {
+  return `path=${encodeURIComponent(filePath)}`;
 }
 
 function usage(): never {
-  console.error(`Usage: provenance-editor <command> [args]
+  console.error(`Usage: attrimark <command> [args]
 
 Commands:
-  doc list                                List documents
-  doc get <id>                            Get document with blocks and stats
-  doc create --title <title>              Create document
-  doc delete <id>                         Delete document
+  read <file.attrimark>                     Output Markdown content
+  read <file.attrimark> --json              Output full JSON structure
 
-  block list <doc-id>                     List blocks
-  block create <doc-id> -c <content>      Create block
-  block update <doc-id> <bid> -c <content>  Update block content
-  block patch <doc-id> <bid> --old <s> --new <s>  Patch block
-  block split <doc-id> <bid> --pos <N>     Split block at position N
-  block merge <doc-id> <bid> --target <tid>  Merge bid into tid
-  block delete <doc-id> <bid>             Delete block
+  doc list [--dir <dir>]                    List documents in directory
+  doc get <file.attrimark>                  Get document with blocks and stats
+  doc create <file.attrimark> --title <t>   Create document
+  doc delete <file.attrimark>               Delete document
 
-  stats <doc-id>                          Get document stats
-  export <doc-id> [--full]                Export document
-  import <file.md> [--source human|agent] [--provenance <file>]
+  block list <file.attrimark>               List blocks
+  block create <file.attrimark> -c <text>   Create block
+  block update <file.attrimark> <bid> -c <text>  Update block
+  block patch <file.attrimark> <bid> --old <s> --new <s>  Patch block
+  block split <file.attrimark> <bid> --pos <N>  Split block
+  block merge <file.attrimark> <bid> --target <tid>  Merge blocks
+  block delete <file.attrimark> <bid>       Delete block
+
+  stats <file.attrimark>                    Get document stats
+  export <file.attrimark> [--full]          Export document
+  import <file.md> --output <out.attrimark> [--source human|agent]
 
 Options:
   --human           Set author.type to human (default: agent)
@@ -78,29 +95,44 @@ function findOption(flag: string): string | undefined {
 const isHuman = findFlag("--human");
 const authorName = findOption("--name");
 const author = { type: isHuman ? "human" as const : "agent" as const, name: authorName };
+const jsonFlag = findFlag("--json");
 
 async function main() {
   const cmd = args[0];
   const sub = args[1];
 
   switch (cmd) {
+    case "read": {
+      const file = args[1];
+      if (!file) usage();
+      if (jsonFlag) {
+        return out(await request("GET", `/documents/detail?${q(file)}`));
+      } else {
+        return out(await request("GET", `/export?${q(file)}&format=md`));
+      }
+    }
+
     case "doc": {
       switch (sub) {
-        case "list":
-          return out(await request("GET", "/documents"));
+        case "list": {
+          const dir = findOption("--dir") ?? process.cwd();
+          return out(await request("GET", `/documents?dir=${encodeURIComponent(dir)}`));
+        }
         case "get": {
-          const id = args[2];
-          if (!id) usage();
-          return out(await request("GET", `/documents/${id}`));
+          const file = args[2];
+          if (!file) usage();
+          return out(await request("GET", `/documents/detail?${q(file)}`));
         }
         case "create": {
+          const file = args[2];
+          if (!file) usage();
           const title = findOption("--title") ?? "Untitled";
-          return out(await request("POST", "/documents", { title }));
+          return out(await request("POST", "/documents", { title, path: file }));
         }
         case "delete": {
-          const id = args[2];
-          if (!id) usage();
-          await request("DELETE", `/documents/${id}`);
+          const file = args[2];
+          if (!file) usage();
+          await request("DELETE", `/documents?${q(file)}`);
           return out({ deleted: true });
         }
         default:
@@ -110,16 +142,16 @@ async function main() {
     }
 
     case "block": {
-      const docId = args[2];
-      if (!docId) usage();
+      const file = args[2];
+      if (!file) usage();
 
       switch (sub) {
         case "list":
-          return out(await request("GET", `/documents/${docId}/blocks`));
+          return out(await request("GET", `/blocks?${q(file)}`));
         case "create": {
           const content = findOption("-c") ?? "";
           return out(
-            await request("POST", `/documents/${docId}/blocks`, {
+            await request("POST", `/blocks?${q(file)}`, {
               content,
               author,
             })
@@ -129,15 +161,14 @@ async function main() {
           const bid = args[3];
           if (!bid) usage();
           const content = findOption("-c") ?? "";
-          // Need to get current version first
-          const block = (await request("GET", `/documents/${docId}/blocks`)) as any[];
-          const current = block.find((b: any) => b.id === bid);
+          const blocks = (await request("GET", `/blocks?${q(file)}`)) as any[];
+          const current = blocks.find((b: any) => b.id === bid);
           if (!current) {
             console.error("Block not found");
             process.exit(1);
           }
           return out(
-            await request("PUT", `/documents/${docId}/blocks/${bid}`, {
+            await request("PUT", `/blocks/${bid}?${q(file)}`, {
               content,
               author,
               version: current.version,
@@ -150,15 +181,14 @@ async function main() {
           const oldStr = findOption("--old");
           const newStr = findOption("--new");
           if (!oldStr || !newStr) usage();
-          // Get current version
-          const blocks = (await request("GET", `/documents/${docId}/blocks`)) as any[];
+          const blocks = (await request("GET", `/blocks?${q(file)}`)) as any[];
           const current = blocks.find((b: any) => b.id === bid);
           if (!current) {
             console.error("Block not found");
             process.exit(1);
           }
           return out(
-            await request("PATCH", `/documents/${docId}/blocks/${bid}`, {
+            await request("PATCH", `/blocks/${bid}?${q(file)}`, {
               old: oldStr,
               new: newStr,
               author,
@@ -172,16 +202,16 @@ async function main() {
           const posStr = findOption("--pos");
           if (!posStr) usage();
           const pos = parseInt(posStr!, 10);
-          const blocks2 = (await request("GET", `/documents/${docId}/blocks`)) as any[];
-          const current2 = blocks2.find((b: any) => b.id === bid);
-          if (!current2) {
+          const blocks = (await request("GET", `/blocks?${q(file)}`)) as any[];
+          const current = blocks.find((b: any) => b.id === bid);
+          if (!current) {
             console.error("Block not found");
             process.exit(1);
           }
           return out(
-            await request("POST", `/documents/${docId}/blocks/${bid}/split`, {
+            await request("POST", `/blocks/${bid}/split?${q(file)}`, {
               position: pos,
-              version: current2.version,
+              version: current.version,
             })
           );
         }
@@ -190,15 +220,15 @@ async function main() {
           if (!bid) usage();
           const targetId = findOption("--target");
           if (!targetId) usage();
-          const blocks3 = (await request("GET", `/documents/${docId}/blocks`)) as any[];
-          const source = blocks3.find((b: any) => b.id === bid);
-          const target = blocks3.find((b: any) => b.id === targetId);
+          const blocks = (await request("GET", `/blocks?${q(file)}`)) as any[];
+          const source = blocks.find((b: any) => b.id === bid);
+          const target = blocks.find((b: any) => b.id === targetId);
           if (!source || !target) {
             console.error("Block not found");
             process.exit(1);
           }
           return out(
-            await request("POST", `/documents/${docId}/blocks/${bid}/merge`, {
+            await request("POST", `/blocks/${bid}/merge?${q(file)}`, {
               targetBlockId: targetId,
               version: source.version,
               targetVersion: target.version,
@@ -209,13 +239,13 @@ async function main() {
         case "delete": {
           const bid = args[3];
           if (!bid) usage();
-          const blocks = (await request("GET", `/documents/${docId}/blocks`)) as any[];
+          const blocks = (await request("GET", `/blocks?${q(file)}`)) as any[];
           const current = blocks.find((b: any) => b.id === bid);
           if (!current) {
             console.error("Block not found");
             process.exit(1);
           }
-          await request("DELETE", `/documents/${docId}/blocks/${bid}`, {
+          await request("DELETE", `/blocks/${bid}?${q(file)}`, {
             version: current.version,
           });
           return out({ deleted: true });
@@ -227,45 +257,33 @@ async function main() {
     }
 
     case "stats": {
-      const docId = args[1];
-      if (!docId) usage();
-      return out(await request("GET", `/documents/${docId}/stats`));
+      const file = args[1];
+      if (!file) usage();
+      return out(await request("GET", `/stats?${q(file)}`));
     }
 
     case "export": {
-      const docId = args[1];
-      if (!docId) usage();
+      const file = args[1];
+      if (!file) usage();
       const full = findFlag("--full");
-      const format = full ? "full" : "md";
-      const res = await fetch(`${BASE_URL}/documents/${docId}/export?format=${format}`);
-      if (!res.ok) {
-        console.error(await res.text());
-        process.exit(1);
-      }
-      if (format === "md") {
-        console.log(await res.text());
+      if (full) {
+        return out(await request("GET", `/export?${q(file)}&format=full`));
       } else {
-        out(await res.json());
+        return out(await request("GET", `/export?${q(file)}&format=md`));
       }
-      return;
     }
 
     case "import": {
-      const file = args[1];
-      if (!file) usage();
+      const mdFile = args[1];
+      if (!mdFile) usage();
+      const outputPath = findOption("--output");
+      if (!outputPath) usage();
       const source = findOption("--source") ?? "agent";
-      const provFile = findOption("--provenance");
-
-      const markdown = await Bun.file(file).text();
-      let provenance;
-      if (provFile) {
-        provenance = JSON.parse(await Bun.file(provFile).text());
-      }
-
+      const markdown = await Bun.file(mdFile).text();
       return out(
-        await request("POST", "/documents/import", {
+        await request("POST", "/import", {
           markdown,
-          provenance,
+          path: outputPath,
           defaultSource: source,
         })
       );

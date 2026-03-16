@@ -7,7 +7,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<DocumentList />} />
-        <Route path="/doc/:id" element={<DocumentEditor />} />
+        <Route path="/doc" element={<DocumentEditor />} />
       </Routes>
     </BrowserRouter>
   );

@@ -1,13 +1,13 @@
 const BASE = "/api";
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const opts: RequestInit = {
     method,
     headers: { "Content-Type": "application/json" },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
 
-  const res = await fetch(`${BASE}${path}`, opts);
+  const res = await fetch(`${BASE}${url}`, opts);
   if (res.status === 204) return null as T;
 
   const data = await res.json();
@@ -15,46 +15,55 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data;
 }
 
+function q(path: string): string {
+  return `path=${encodeURIComponent(path)}`;
+}
+
 // Documents
-export const listDocuments = () => request<any[]>("GET", "/documents");
-export const getDocument = (id: string) => request<any>("GET", `/documents/${id}`);
-export const createDocument = (title: string) => request<any>("POST", "/documents", { title });
-export const deleteDocument = (id: string) => request<void>("DELETE", `/documents/${id}`);
+export const listDocuments = (dir?: string) =>
+  request<any[]>("GET", `/documents${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
+export const getDocument = (path: string) =>
+  request<any>("GET", `/documents/detail?${q(path)}`);
+export const createDocument = (title: string, path: string) =>
+  request<any>("POST", "/documents", { title, path });
+export const deleteDocument = (path: string) =>
+  request<void>("DELETE", `/documents?${q(path)}`);
 
 // Blocks
-export const listBlocks = (docId: string) => request<any[]>("GET", `/documents/${docId}/blocks`);
+export const listBlocks = (path: string) =>
+  request<any[]>("GET", `/blocks?${q(path)}`);
 
-export const createBlock = (docId: string, content: string, position?: number) =>
-  request<any>("POST", `/documents/${docId}/blocks`, {
+export const createBlock = (path: string, content: string, position?: number) =>
+  request<any>("POST", `/blocks?${q(path)}`, {
     content,
     author: { type: "human" },
     position,
   });
 
-export const updateBlock = (docId: string, blockId: string, content: string, version: number) =>
-  request<any>("PUT", `/documents/${docId}/blocks/${blockId}`, {
+export const updateBlock = (path: string, blockId: string, content: string, version: number) =>
+  request<any>("PUT", `/blocks/${blockId}?${q(path)}`, {
     content,
     author: { type: "human" },
     version,
   });
 
-export const patchBlock = (docId: string, blockId: string, oldStr: string, newStr: string, version: number) =>
-  request<any>("PATCH", `/documents/${docId}/blocks/${blockId}`, {
+export const patchBlock = (path: string, blockId: string, oldStr: string, newStr: string, version: number) =>
+  request<any>("PATCH", `/blocks/${blockId}?${q(path)}`, {
     old: oldStr,
     new: newStr,
     author: { type: "human" },
     version,
   });
 
-export const deleteBlockApi = (docId: string, blockId: string, version: number) =>
-  request<void>("DELETE", `/documents/${docId}/blocks/${blockId}`, { version });
+export const deleteBlockApi = (path: string, blockId: string, version: number) =>
+  request<void>("DELETE", `/blocks/${blockId}?${q(path)}`, { version });
 
 // Split / Merge
-export const splitBlock = (docId: string, blockId: string, position: number, version: number) =>
-  request<any>("POST", `/documents/${docId}/blocks/${blockId}/split`, { position, version });
+export const splitBlock = (path: string, blockId: string, position: number, version: number) =>
+  request<any>("POST", `/blocks/${blockId}/split?${q(path)}`, { position, version });
 
-export const mergeBlocks = (docId: string, sourceId: string, targetId: string, sourceVersion: number, targetVersion: number) =>
-  request<any>("POST", `/documents/${docId}/blocks/${sourceId}/merge`, {
+export const mergeBlocks = (path: string, sourceId: string, targetId: string, sourceVersion: number, targetVersion: number) =>
+  request<any>("POST", `/blocks/${sourceId}/merge?${q(path)}`, {
     targetBlockId: targetId,
     version: sourceVersion,
     targetVersion,
@@ -62,16 +71,16 @@ export const mergeBlocks = (docId: string, sourceId: string, targetId: string, s
   });
 
 // Stats
-export const getStats = (docId: string) => request<any>("GET", `/documents/${docId}/stats`);
+export const getStats = (path: string) => request<any>("GET", `/stats?${q(path)}`);
 
 // Export
-export const exportDocument = async (docId: string, format: "md" | "full") => {
-  const res = await fetch(`${BASE}/documents/${docId}/export?format=${format}`);
+export const exportDocument = async (path: string, format: "md" | "full") => {
+  const res = await fetch(`${BASE}/export?${q(path)}&format=${format}`);
   if (!res.ok) throw new Error("Export failed");
   if (format === "md") return res.text();
   return res.json();
 };
 
 // Import
-export const importDocument = (markdown: string, defaultSource?: string, provenance?: any) =>
-  request<any>("POST", "/documents/import", { markdown, defaultSource, provenance });
+export const importDocument = (markdown: string, outputPath: string, defaultSource?: string) =>
+  request<any>("POST", "/import", { markdown, path: outputPath, defaultSource });

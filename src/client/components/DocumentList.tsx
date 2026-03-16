@@ -6,6 +6,7 @@ import * as api from "../api";
 export function DocumentList() {
   const { documents, loadDocuments } = useEditorStore();
   const [title, setTitle] = useState("");
+  const [filePath, setFilePath] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const navigate = useNavigate();
@@ -14,34 +15,36 @@ export function DocumentList() {
     loadDocuments();
   }, []);
 
+  const navToDoc = (path: string) => navigate(`/doc?path=${encodeURIComponent(path)}`);
+
   const handleCreate = async () => {
-    if (!title.trim()) return;
-    const doc = await api.createDocument(title.trim());
+    if (!title.trim() || !filePath.trim()) return;
+    let path = filePath.trim();
+    if (!path.endsWith(".attrimark")) path += ".attrimark";
+    const doc = await api.createDocument(title.trim(), path);
     setTitle("");
+    setFilePath("");
     setShowCreate(false);
-    navigate(`/doc/${doc.id}`);
+    navToDoc(doc.path);
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (path: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("确定要删除这个文档吗？")) return;
-    await api.deleteDocument(id);
+    await api.deleteDocument(path);
     loadDocuments();
   };
 
   const handleImport = async (file: File) => {
     const text = await file.text();
-    let provenance: any;
-
-    // Check if there's a corresponding .provenance.json
-    const baseName = file.name.replace(/\.md$/, "");
-    // Can't auto-detect provenance file in browser, just import as-is
     const source = prompt("内容来源？输入 human 或 agent", "human");
     if (source !== "human" && source !== "agent") return;
+    const outputPath = prompt("保存路径（.attrimark 文件）", file.name.replace(/\.(md|markdown|txt)$/, ".attrimark"));
+    if (!outputPath) return;
 
-    const doc = await api.importDocument(text, source, provenance);
+    const doc = await api.importDocument(text, outputPath, source);
     setShowImport(false);
-    navigate(`/doc/${doc.id}`);
+    navToDoc(doc.path);
   };
 
   return (
@@ -69,8 +72,15 @@ export function DocumentList() {
               placeholder="文档标题"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               autoFocus
+            />
+            <input
+              type="text"
+              placeholder="文件路径（如 docs/my-doc.attrimark）"
+              value={filePath}
+              onChange={(e) => setFilePath(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              style={{ marginTop: 8 }}
             />
             <div className="dialog-actions">
               <button className="btn" onClick={() => setShowCreate(false)}>取消</button>
@@ -101,10 +111,10 @@ export function DocumentList() {
 
       <div className="doc-grid">
         {documents.map((doc) => (
-          <div key={doc.id} className="doc-card" onClick={() => navigate(`/doc/${doc.id}`)}>
+          <div key={doc.path} className="doc-card" onClick={() => navToDoc(doc.path)}>
             <h3>{doc.title}</h3>
             <span className="doc-date">{new Date(doc.updatedAt).toLocaleDateString("zh-CN")}</span>
-            <button className="btn-icon btn-delete" onClick={(e) => handleDelete(doc.id, e)} title="删除">
+            <button className="btn-icon btn-delete" onClick={(e) => handleDelete(doc.path, e)} title="删除">
               &times;
             </button>
           </div>

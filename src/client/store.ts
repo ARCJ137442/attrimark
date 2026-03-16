@@ -11,7 +11,7 @@ interface EditorStore {
   blocks: any[];
   stats: any | null;
 
-  loadDocument(id: string): Promise<void>;
+  loadDocument(path: string): Promise<void>;
   createBlock(content: string, position?: number): Promise<any>;
   updateBlock(blockId: string, content: string, version: number): Promise<any>;
   deleteBlock(blockId: string, version: number): Promise<void>;
@@ -25,7 +25,7 @@ interface EditorStore {
 
   // SSE
   eventSource: EventSource | null;
-  connectSSE(documentId: string): void;
+  connectSSE(path: string): void;
   disconnectSSE(): void;
 
   // Local block updates (from SSE or optimistic)
@@ -48,20 +48,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({ documents });
   },
 
-  async loadDocument(id: string) {
-    const data = await api.getDocument(id);
+  async loadDocument(path: string) {
+    const data = await api.getDocument(path);
     set({
-      document: { id: data.id, title: data.title, createdAt: data.createdAt, updatedAt: data.updatedAt },
+      document: { path: data.path, title: data.title, createdAt: data.createdAt, updatedAt: data.updatedAt },
       blocks: data.blocks,
       stats: data.stats,
     });
-    get().connectSSE(id);
+    get().connectSSE(path);
   },
 
   async createBlock(content: string, position?: number) {
     const { document } = get();
     if (!document) return;
-    const block = await api.createBlock(document.id, content, position);
+    const block = await api.createBlock(document.path, content, position);
     get()._addLocalBlock(block);
     return block;
   },
@@ -69,7 +69,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   async updateBlock(blockId: string, content: string, version: number) {
     const { document } = get();
     if (!document) return;
-    const block = await api.updateBlock(document.id, blockId, content, version);
+    const block = await api.updateBlock(document.path, blockId, content, version);
     get()._updateLocalBlock(block);
     return block;
   },
@@ -77,14 +77,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   async deleteBlock(blockId: string, version: number) {
     const { document } = get();
     if (!document) return;
-    await api.deleteBlockApi(document.id, blockId, version);
+    await api.deleteBlockApi(document.path, blockId, version);
     get()._removeLocalBlock(blockId);
   },
 
   async splitBlock(blockId: string, position: number, version: number) {
     const { document } = get();
     if (!document) return;
-    const result = await api.splitBlock(document.id, blockId, position, version);
+    const result = await api.splitBlock(document.path, blockId, position, version);
     get()._updateLocalBlock(result.original);
     get()._addLocalBlock(result.new);
     return result;
@@ -93,7 +93,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   async mergeBlocks(sourceId: string, targetId: string, sourceVersion: number, targetVersion: number) {
     const { document } = get();
     if (!document) return;
-    const result = await api.mergeBlocks(document.id, sourceId, targetId, sourceVersion, targetVersion);
+    const result = await api.mergeBlocks(document.path, sourceId, targetId, sourceVersion, targetVersion);
     get()._updateLocalBlock(result.merged);
     get()._removeLocalBlock(sourceId);
     return result;
@@ -106,11 +106,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     });
   },
 
-  connectSSE(documentId: string) {
+  connectSSE(docPath: string) {
     get().disconnectSSE();
-    // SSE connects directly to backend to avoid Vite proxy buffering
     const sseBase = import.meta.env.DEV ? "http://localhost:12479" : "";
-    const es = new EventSource(`${sseBase}/api/documents/${documentId}/events`);
+    const es = new EventSource(`${sseBase}/api/events?path=${encodeURIComponent(docPath)}`);
 
     es.addEventListener("block_created", (e) => {
       const block = JSON.parse(e.data);

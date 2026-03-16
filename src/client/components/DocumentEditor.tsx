@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useEditorStore } from "../store";
 import { BlockCard } from "./BlockCard";
 import { StatsBar } from "./StatsBar";
@@ -9,7 +9,8 @@ import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
 
 export function DocumentEditor() {
-  const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const docPath = searchParams.get("path");
   const navigate = useNavigate();
   const {
     document, blocks, stats, loadDocument,
@@ -21,9 +22,9 @@ export function DocumentEditor() {
   const viewRefs = useRef<Map<string, EditorView | null>>(new Map());
 
   useEffect(() => {
-    if (id) loadDocument(id);
+    if (docPath) loadDocument(docPath);
     return () => disconnectSSE();
-  }, [id]);
+  }, [docPath]);
 
   // Global keyboard: Enter to refocus last block when nothing is focused
   useEffect(() => {
@@ -63,14 +64,14 @@ export function DocumentEditor() {
         return await updateBlock(blockId, content, version);
       } catch (err: any) {
         if (err.status === 409) {
-          if (id) loadDocument(id);
+          if (docPath) loadDocument(docPath);
         } else if (err.status === 404) {
           return;
         }
         throw err;
       }
     },
-    [updateBlock, id, loadDocument]
+    [updateBlock, docPath, loadDocument]
   );
 
   // Flush a block's pending content to server, return latest version
@@ -159,10 +160,10 @@ export function DocumentEditor() {
           }, 50);
         }
       } catch (err: any) {
-        if (err.status === 409 && id) loadDocument(id);
+        if (err.status === 409 && docPath) loadDocument(docPath!);
       }
     },
-    [splitBlock, id, loadDocument]
+    [splitBlock, docPath, loadDocument]
   );
 
   // Merge current block into previous (Backspace at position 0)
@@ -189,10 +190,10 @@ export function DocumentEditor() {
           }
         }, 50);
       } catch (err: any) {
-        if (err.status === 409 && id) loadDocument(id);
+        if (err.status === 409 && docPath) loadDocument(docPath!);
       }
     },
-    [blocks, mergeBlocks, flushBlock, id, loadDocument]
+    [blocks, mergeBlocks, flushBlock, docPath, loadDocument]
   );
 
   // Merge next block into current (Delete at end)
@@ -217,10 +218,10 @@ export function DocumentEditor() {
           }
         }, 50);
       } catch (err: any) {
-        if (err.status === 409 && id) loadDocument(id);
+        if (err.status === 409 && docPath) loadDocument(docPath!);
       }
     },
-    [blocks, mergeBlocks, flushBlock, id, loadDocument]
+    [blocks, mergeBlocks, flushBlock, docPath, loadDocument]
   );
 
   // Focus helpers with cursor positioning
@@ -271,8 +272,8 @@ export function DocumentEditor() {
   );
 
   const handleExport = async (format: "md" | "full") => {
-    if (!id) return;
-    const data = await api.exportDocument(id, format);
+    if (!docPath) return;
+    const data = await api.exportDocument(docPath, format);
     const blob = new Blob(
       [typeof data === "string" ? data : JSON.stringify(data, null, 2)],
       { type: "application/octet-stream" }
